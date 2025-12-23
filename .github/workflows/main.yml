@@ -176,7 +176,9 @@ jobs:
       run: |
         mkdir -p ~/.kube
         echo "$KUBE_CONFIG_DATA" > ~/.kube/config
+        # Проверяем конфигурацию
         kubectl config view
+        kubectl cluster-info
     
     - name: Update image in deployment
       env:
