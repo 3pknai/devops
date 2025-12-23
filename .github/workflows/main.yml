@@ -158,27 +158,18 @@ jobs:
         docker rm preview-app || true
 
   deploy-to-k8s:
-    needs: build-push-and-preview  # Запускать после сборки образа
-    runs-on: ubuntu-latest
+    needs: build-push-and-preview
+    runs-on: [self-hosted, linux, vm]  # Используем self-hosted runner с метками
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Set up Kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'v1.34.0'  # Используем ту же версию, что и в Minikube
-    
-    - name: Configure kubectl with Minikube config
-      env:
-        MINIKUBE_IP: "192.168.49.2"  # Ваш minikube ip
-        KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
+    - name: Configure kubectl
       run: |
-        kubectl config set-cluster minikube --server=https://$MINIKUBE_IP:8443 --insecure-skip-tls-verify=true
-        kubectl config set-credentials github-actions --token=$KUBE_TOKEN
-        kubectl config set-context minikube --cluster=minikube --user=github-actions
-        kubectl config use-context minikube
+        # Проверяем, что kubectl доступен
+        kubectl version --client
+        kubectl cluster-info
     
     - name: Update image in deployment
       env:
@@ -189,16 +180,17 @@ jobs:
         echo "=== Updated deployment.yaml ==="
         cat k8s/deployment.yaml | grep image:
     
-    - name: Deploy to Kubernetes
+    - name: Deploy to Minikube
       run: |
+        echo "=== Current context ==="
+        kubectl config current-context
+        
         echo "=== Applying manifests ==="
         kubectl apply -f k8s/
         
         echo "=== Checking deployment ==="
         kubectl rollout status deployment/simple-web-app-deployment --timeout=2m
         
-        echo "=== Current pods ==="
+        echo "=== Result ==="
         kubectl get pods -l app=simple-web-app
-        
-        echo "=== Current services ==="
         kubectl get service simple-web-app-service
