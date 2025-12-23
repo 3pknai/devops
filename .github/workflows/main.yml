@@ -159,7 +159,7 @@ jobs:
 
   deploy-to-k8s:
     needs: build-push-and-preview
-    runs-on: [self-hosted, linux, vm]  # Используем self-hosted runner с метками
+    runs-on: self-hosted  # Используем self-hosted runner с метками
     
     steps:
     - name: Checkout code
