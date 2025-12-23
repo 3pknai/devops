@@ -172,13 +172,13 @@ jobs:
     
     - name: Configure kubectl with Minikube config
       env:
-        KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+        MINIKUBE_IP: "192.168.49.2"  # Ваш minikube ip
+        KUBE_TOKEN: ${{ secrets.KUBE_TOKEN }}
       run: |
-        mkdir -p ~/.kube
-        echo "$KUBE_CONFIG_DATA" > ~/.kube/config
-        # Проверяем конфигурацию
-        kubectl config view
-        kubectl cluster-info
+        kubectl config set-cluster minikube --server=https://$MINIKUBE_IP:8443 --insecure-skip-tls-verify=true
+        kubectl config set-credentials github-actions --token=$KUBE_TOKEN
+        kubectl config set-context minikube --cluster=minikube --user=github-actions
+        kubectl config use-context minikube
     
     - name: Update image in deployment
       env:
