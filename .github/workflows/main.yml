@@ -156,3 +156,47 @@ jobs:
       run: |
         docker stop preview-app || true
         docker rm preview-app || true
+
+  deploy-to-k8s:
+    needs: build-push-and-preview  # Запускать после сборки образа
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.34.0'  # Используем ту же версию, что и в Minikube
+    
+    - name: Configure kubectl with Minikube config
+      env:
+        KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+      run: |
+        mkdir -p ~/.kube
+        echo "$KUBE_CONFIG_DATA" > ~/.kube/config
+        kubectl config view
+    
+    - name: Update image in deployment
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      run: |
+        # Обновляем образ в deployment.yaml
+        sed -i "s|image:.*|image: $DOCKERHUB_USERNAME/simple-web-app:latest|g" k8s/deployment.yaml
+        echo "=== Updated deployment.yaml ==="
+        cat k8s/deployment.yaml | grep image:
+    
+    - name: Deploy to Kubernetes
+      run: |
+        echo "=== Applying manifests ==="
+        kubectl apply -f k8s/
+        
+        echo "=== Checking deployment ==="
+        kubectl rollout status deployment/simple-web-app-deployment --timeout=2m
+        
+        echo "=== Current pods ==="
+        kubectl get pods -l app=simple-web-app
+        
+        echo "=== Current services ==="
+        kubectl get service simple-web-app-service
