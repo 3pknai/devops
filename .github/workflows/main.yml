@@ -1,0 +1,130 @@
+name: CI/CD Pipeline for Simple Web App
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest flask
+    
+    - name: Lint with flake8
+      run: |
+        # Остановка пайплайна, если есть ошибки линтинга
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Предупреждения
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Test with pytest
+      run: |
+        # Создаем простой тест
+        cat > test_app.py << 'EOF'
+        import sys
+        sys.path.insert(0, '.')
+        
+        try:
+            from app import app
+            print("✓ App imports successfully")
+            
+            with app.test_client() as client:
+                response = client.get('/')
+                assert response.status_code == 200
+                print("✓ Root endpoint returns 200")
+                
+                response = client.get('/health')
+                assert response.status_code == 200
+                print("✓ Health endpoint returns 200")
+                
+            print("✓ All tests passed!")
+        except Exception as e:
+            print(f"✗ Test failed: {e}")
+            sys.exit(1)
+        EOF
+        
+        python test_app.py
+
+  build-and-push:
+    needs: test  # Запускается только после успешного тестирования
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ secrets.DOCKERHUB_USERNAME }}/simple-web-app:latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/simple-web-app:${{ github.sha }}
+
+  deploy:
+    needs: build-and-push  # Запускается после сборки образа
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    
+    - name: Add VM to known_hosts
+      run: |
+        ssh-keyscan 192.168.0.142 >> ~/.ssh/known_hosts
+    
+    - name: Deploy to VM
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      run: |
+        ssh -o StrictHostKeyChecking=no devops_user@192.168.0.142 "
+          # Останавливаем и удаляем старый контейнер
+          docker stop simple-web-app || true
+          docker rm simple-web-app || true
+          
+          # Удаляем старый образ (опционально)
+          docker image rm $DOCKERHUB_USERNAME/simple-web-app:latest || true
+          
+          # Запускаем новый контейнер
+          docker run -d \
+            --name simple-web-app \
+            -p 5000:5000 \
+            --restart unless-stopped \
+            $DOCKERHUB_USERNAME/simple-web-app:latest
+          
+          # Проверяем, что контейнер запустился
+          sleep 3
+          docker ps | grep simple-web-app
+          
+          # Проверяем здоровье приложения
+          curl -f http://localhost:5000/health || exit 1
+        "
